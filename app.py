@@ -108,7 +108,7 @@ with st.sidebar:
     with col2:
         end_h = st.number_input("Business End (Hour)", 0, 23, 21)
 
-    total_calls = st.slider("Total Calls Per Day", 1, 200, 80)
+    total_calls = st.slider("Total Calls Per Day", 1, 1440, 80)
     answered_calls = st.slider("Answered Calls Per Day", 0, total_calls, 7)
     jitter = st.number_input("Jitter (Max Seconds)", 0, 300, 30)
 
@@ -139,4 +139,5 @@ if st.button("Generate Call Logs"):
                 )
                 st.dataframe(df.head(20)) # Show preview
             else:
+
                 st.warning("No data generated. Check your time/call settings.")
