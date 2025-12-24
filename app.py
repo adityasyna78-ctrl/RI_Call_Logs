@@ -17,15 +17,12 @@ def generate_all_call_data(phone_numbers, start_date, end_date, business_start, 
     
     remaining_statuses_pool = ["Busy", "Not Answered", "Others"]
     
-    # Ensure start and end date are handled correctly
+    # Ensure start_date is a datetime object at midnight
     current_date = datetime.combine(start_date, datetime.min.time())
-    
-    # If date_input only returns one date, handle it
-    if isinstance(end_date, (list, tuple)):
-        end_dt = datetime.combine(end_date[-1], datetime.min.time())
-    else:
-        end_dt = datetime.combine(end_date, datetime.min.time())
+    # Ensure end_date is a datetime object at midnight
+    end_dt = datetime.combine(end_date, datetime.min.time())
 
+    # --- THE FIX: The while loop now correctly increments current_date ---
     while current_date <= end_dt:
         day_start_time = current_date + timedelta(hours=business_start)
         day_end_time = current_date + timedelta(hours=business_end)
@@ -67,11 +64,13 @@ def generate_all_call_data(phone_numbers, start_date, end_date, business_start, 
                     "Phone": phone
                 })
                 attempt += 1
+        
+        # IMPORTANT: Increment the date to move to the next day
         current_date += timedelta(days=1)
+        
     return all_records
 
 def create_pdf_bytes(df):
-    # 'Helvetica' is a standard PDF font that works on all servers
     pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     pdf.set_font("Helvetica", size=9)
@@ -93,10 +92,8 @@ def create_pdf_bytes(df):
             pdf.cell(width, 7, str(item), border=1, ln=0, align='C', fill=True)
         pdf.ln()
 
-    # Print Header
     print_row(df.columns.tolist(), is_header=True) 
     
-    # Print Rows
     for row in df.values.tolist():
         if row[3] == "Answered":
             pdf.set_text_color(0, 100, 0)
@@ -119,7 +116,7 @@ with st.sidebar:
         
     phone_input = st.text_area("Phone Numbers (One per line or comma separated)")
     
-    # Safety for date selection
+    # Date Range Picker
     date_val = st.date_input("Date Range", [datetime.now(), datetime.now() + timedelta(days=2)])
     
     col1, col2 = st.columns(2)
@@ -135,15 +132,15 @@ with st.sidebar:
 if st.button("Generate Call Logs"):
     if not phone_input:
         st.error("Please enter at least one phone number.")
-    elif isinstance(date_val, list) and len(date_val) < 2:
-        st.error("Please select a complete range (Start and End date).")
+    elif isinstance(date_val, (list, tuple)) and len(date_val) < 2:
+        st.error("Please select both a Start and End date.")
     else:
         numbers = phone_input.replace('\n', ',').split(',')
         numbers = [n.strip() for n in numbers if n.strip()]
         
-        # Extract start and end from date_val
+        # Correctly extract start and end dates from Streamlit input
         start_d = date_val[0]
-        end_d = date_val[1] if (isinstance(date_val, list) and len(date_val) > 1) else date_val[0]
+        end_d = date_val[1]
         
         with st.spinner("Generating data..."):
             try:
@@ -152,7 +149,7 @@ if st.button("Generate Call Logs"):
                 
                 if not df.empty:
                     pdf_bytes = create_pdf_bytes(df)
-                    st.success(f"Generated {len(df)} records!")
+                    st.success(f"Generated {len(df)} records for {len(df['Date Time'].str[:10].unique())} days!")
                     
                     st.download_button(
                         label="Download PDF",
@@ -160,7 +157,7 @@ if st.button("Generate Call Logs"):
                         file_name=file_name,
                         mime="application/pdf"
                     )
-                    st.dataframe(df.head(20))
+                    st.dataframe(df)
                 else:
                     st.warning("No data generated. Check settings.")
             except Exception as e:
