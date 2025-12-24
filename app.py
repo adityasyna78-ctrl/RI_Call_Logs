@@ -12,20 +12,21 @@ def generate_all_call_data(phone_numbers, start_date, end_date, business_start, 
     total_business_hours = business_end - business_start
     total_business_seconds = total_business_hours * 3600
     
-    # Calculate interval based on the new max calls
+    # Calculate interval
     uniform_interval_seconds = total_business_seconds / total_calls_per_day
     
     remaining_statuses_pool = ["Busy", "Not Answered", "Others"]
-    remaining_calls_count = total_calls_per_day - avg_answered_total
     
+    # Ensure start and end date are handled correctly
     current_date = datetime.combine(start_date, datetime.min.time())
-    # Handle single date selection or range
-    if isinstance(end_date, datetime):
-        end_datetime = end_date
+    
+    # If date_input only returns one date, handle it
+    if isinstance(end_date, (list, tuple)):
+        end_dt = datetime.combine(end_date[-1], datetime.min.time())
     else:
-        end_datetime = datetime.combine(end_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.min.time())
 
-    while current_date <= end_datetime:
+    while current_date <= end_dt:
         day_start_time = current_date + timedelta(hours=business_start)
         day_end_time = current_date + timedelta(hours=business_end)
 
@@ -36,11 +37,11 @@ def generate_all_call_data(phone_numbers, start_date, end_date, business_start, 
             lead_id = random.randint(300000, 400000)
             attempt = 1
             
-            # Ensure we don't try to generate more 'Answered' calls than total calls
+            # Setup statuses for the day
             actual_answered = min(avg_answered_total, total_calls_per_day)
             daily_statuses = ["Answered"] * actual_answered
-            
             remaining_for_this_day = total_calls_per_day - actual_answered
+            
             for _ in range(remaining_for_this_day):
                 daily_statuses.append(random.choice(remaining_statuses_pool))
             
@@ -52,14 +53,13 @@ def generate_all_call_data(phone_numbers, start_date, end_date, business_start, 
                 time_advance = uniform_interval_seconds + jitter
                 time_cursor += timedelta(seconds=time_advance)
                 
-                # Check if we've pushed past the business end time
                 if time_cursor >= day_end_time:
                     break
 
                 length = random.randint(1, 14) if call_status == "Answered" else 0
 
                 all_records.append({
-                    "Date Time": time_cursor.strftime("%d-%m-%Y %H:%M:%S"), # Added seconds for high-frequency calls
+                    "Date Time": time_cursor.strftime("%d-%m-%Y %H:%M:%S"),
                     "Attempt": attempt,
                     "Lead ID": lead_id,
                     "Status": call_status,
@@ -71,10 +71,10 @@ def generate_all_call_data(phone_numbers, start_date, end_date, business_start, 
     return all_records
 
 def create_pdf_bytes(df):
+    # 'Helvetica' is a standard PDF font that works on all servers
     pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
-    # Use 'Helvetica' as it is a standard core font in FPDF
-    pdf.set_font("Helvetica", size=9) 
+    pdf.set_font("Helvetica", size=9)
     
     col_widths = [45, 20, 30, 30, 30, 45]
 
@@ -87,16 +87,17 @@ def create_pdf_bytes(df):
             pdf.set_font('Helvetica', '', 9)
         
         for item, width in zip(data, col_widths):
-            # Page break logic
             if pdf.get_y() > 180:
                 pdf.add_page()
                 print_row(df.columns.tolist(), is_header=True)
             pdf.cell(width, 7, str(item), border=1, ln=0, align='C', fill=True)
         pdf.ln()
 
+    # Print Header
     print_row(df.columns.tolist(), is_header=True) 
+    
+    # Print Rows
     for row in df.values.tolist():
-        # Color 'Answered' status green
         if row[3] == "Answered":
             pdf.set_text_color(0, 100, 0)
         else:
@@ -118,9 +119,8 @@ with st.sidebar:
         
     phone_input = st.text_area("Phone Numbers (One per line or comma separated)")
     
-    # Date Range Picker
-    today = datetime.now()
-    date_range = st.date_input("Date Range", [today, today + timedelta(days=4)])
+    # Safety for date selection
+    date_val = st.date_input("Date Range", [datetime.now(), datetime.now() + timedelta(days=2)])
     
     col1, col2 = st.columns(2)
     with col1:
@@ -128,37 +128,40 @@ with st.sidebar:
     with col2:
         end_h = st.number_input("Business End (Hour)", 0, 23, 21)
 
-    # UPDATED: Max calls set to 1440
     total_calls = st.slider("Total Calls Per Day", 1, 1440, 80)
     answered_calls = st.slider("Answered Calls Per Day", 0, total_calls, 7)
-    jitter = st.number_input("Jitter (Max Seconds)", 0, 300, 10) # Lowered default jitter for high frequency
+    jitter = st.number_input("Jitter (Max Seconds)", 0, 300, 10)
 
 if st.button("Generate Call Logs"):
     if not phone_input:
         st.error("Please enter at least one phone number.")
-    elif len(date_range) < 2:
-        st.error("Please select a start and end date.")
+    elif isinstance(date_val, list) and len(date_val) < 2:
+        st.error("Please select a complete range (Start and End date).")
     else:
         numbers = phone_input.replace('\n', ',').split(',')
         numbers = [n.strip() for n in numbers if n.strip()]
         
-        start_d, end_d = date_range[0], date_range[1]
+        # Extract start and end from date_val
+        start_d = date_val[0]
+        end_d = date_val[1] if (isinstance(date_val, list) and len(date_val) > 1) else date_val[0]
         
         with st.spinner("Generating data..."):
-            data = generate_all_call_data(numbers, start_d, end_d, start_h, end_h, total_calls, answered_calls, jitter)
-            df = pd.DataFrame(data)
-            
-            if not df.empty:
-                pdf_bytes = create_pdf_bytes(df)
-                st.success(f"Generated {len(df)} records!")
+            try:
+                data = generate_all_call_data(numbers, start_d, end_d, start_h, end_h, total_calls, answered_calls, jitter)
+                df = pd.DataFrame(data)
                 
-                st.download_button(
-                    label="Download PDF",
-                    data=pdf_bytes,
-                    file_name=file_name,
-                    mime="application/pdf"
-                )
-                st.write("### Preview (First 20 records)")
-                st.dataframe(df.head(20))
-            else:
-                st.warning("No data generated. Check your time/call settings.")
+                if not df.empty:
+                    pdf_bytes = create_pdf_bytes(df)
+                    st.success(f"Generated {len(df)} records!")
+                    
+                    st.download_button(
+                        label="Download PDF",
+                        data=pdf_bytes,
+                        file_name=file_name,
+                        mime="application/pdf"
+                    )
+                    st.dataframe(df.head(20))
+                else:
+                    st.warning("No data generated. Check settings.")
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
